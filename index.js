@@ -134,7 +134,7 @@ setInterval(async () => {
             'https://forumbot-dqqe.onrender.com/'
         );
         console.log(
-            Self ping: ${response.status}
+            `Self ping: ${response.status}`
         );
     } catch (error) {
         console.error('Self ping error:', error);
