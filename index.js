@@ -12,7 +12,6 @@ const {
 app.get('/health', (_, res) => {
     res.status(30000).send('Bot aktif');
 });
-
 app.listen(3000, () => {
     console.log('Web server aktif');
 });
@@ -127,5 +126,20 @@ process.on('unhandledRejection', error => {
 process.on('uncaughtException', error => {
     console.error('Uncaught exception:', error);
 });
+
+setInterval(async () => {
+
+    try {
+        const response = await fetch(
+            'https://forumbot-dqqe.onrender.com/'
+        );
+        console.log(
+            Self ping: ${response.status}
+        );
+    } catch (error) {
+        console.error('Self ping error:', error);
+    }
+
+}, 30000);
 
 client.login(TOKEN);
