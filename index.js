@@ -112,12 +112,11 @@ client.on('interactionCreate', async interaction => {
 
         // Hapus forum post
         await channel.delete();
-		content: '🗑️ Forum post akan dihapus...',
+		console.log('Forum post akan dihapus');
 
     } catch (error) {
 
-        console.error(error);
-
+        console.error('ERROR:', error);
     }
 });
 
