@@ -17,7 +17,7 @@ const client = new Client({
 });
 
 client.once('ready', async () => {
-    console.log(Login sebagai ${client.user.tag});
+    console.log(`Login sebagai ${client.user.tag}`);
 
     const commands = [
         new SlashCommandBuilder()
@@ -70,7 +70,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         await interaction.reply({
-            content: '🗑️ Forum post akan dihapus...',
+            content: 'Forum post akan dihapus...',
             ephemeral: true
         });
 
