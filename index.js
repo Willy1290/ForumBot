@@ -57,12 +57,13 @@ client.on('interactionCreate', async interaction => {
 
         if (interaction.commandName !== 'delete') return;
 
-        // Ambil channel langsung
-        const channel = interaction.channel;
+        // Ambil forum post/thread
+        const channel =
+            await client.channels.fetch(interaction.channelId);
 
         console.log(channel);
 
-        // Cek apakah channel ada
+        // Kalau gagal ambil channel
         if (!channel) {
 
             return interaction.reply({
@@ -72,7 +73,7 @@ client.on('interactionCreate', async interaction => {
 
         }
 
-        // Cek apakah forum/thread
+        // Cek apakah thread/forum post
         if (
             channel.type !== 11 &&
             channel.type !== 12
@@ -85,17 +86,17 @@ client.on('interactionCreate', async interaction => {
 
         }
 
-        // Owner forum post
+        // Cek owner
         const isOwner =
             channel.ownerId === interaction.user.id;
 
-        // Moderator
+        // Cek moderator
         const isModerator =
             interaction.member.permissions.has(
                 PermissionFlagsBits.ManageThreads
             );
 
-        // Bukan owner/mod
+        // Kalau bukan owner/mod
         if (!isOwner && !isModerator) {
 
             return interaction.reply({
@@ -119,5 +120,4 @@ client.on('interactionCreate', async interaction => {
 
     }
 });
-
 client.login(TOKEN);
