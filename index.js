@@ -54,10 +54,10 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'delete') {
 
-        const thread = interaction.channel;
+        const thread = await interaction.channel.fetch();
 
         // cek apakah forum/thread
-        if (!thread.isThread()) {
+        if (!thread || !thread.isThread()) {
             return interaction.reply({
                 content: 'Command ini hanya bisa dipakai di forum post.',
                 ephemeral: true
