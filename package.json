@@ -1,8 +1,12 @@
 {
+  "name": "ForumBot",
+  "version": "1.0.0",
+  "description": "Discord forum bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "discord.js": "^14.26.4"
-  }
-  "scripts" : {
-	"start": "node index.js"
   }
 }
