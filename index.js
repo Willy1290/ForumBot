@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+const timer = 30000;
 const {
     Client,
     GatewayIntentBits,
@@ -16,6 +17,9 @@ app.get('/', (req, res) => {
 app.listen(3000, () => {
     console.log('Web server aktif');
 });
+setTimeout(()) => {
+	console.log(('ping') => {
+	}, timer);
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
