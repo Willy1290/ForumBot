@@ -55,53 +55,63 @@ client.on('interactionCreate', async interaction => {
 
         if (!interaction.isChatInputCommand()) return;
 
-        if (interaction.commandName === 'delete') {
+        if (interaction.commandName !== 'delete') return;
 
-            const thread =
-                await client.channels.fetch(interaction.channelId);
+        // Ambil channel langsung
+        const channel = interaction.channel;
 
-            if (!thread) {
+        console.log(channel);
 
-                return interaction.reply({
-                    content: 'Thread tidak ditemukan.',
-                    ephemeral: true
-                });
+        // Cek apakah channel ada
+        if (!channel) {
 
-            }
-
-            if (!thread.isThread()) {
-
-                return interaction.reply({
-                    content: 'Command ini hanya bisa dipakai di forum post.',
-                    ephemeral: true
-                });
-
-            }
-
-            const isOwner =
-                thread.ownerId === interaction.user.id;
-
-            const isModerator =
-                interaction.member.permissions.has(
-                    PermissionFlagsBits.ManageThreads
-                );
-
-            if (!isOwner && !isModerator) {
-
-                return interaction.reply({
-                    content: 'Kamu bukan pemilik forum post ini.',
-                    ephemeral: true
-                });
-
-            }
-
-            await interaction.reply({
-                content: 'Forum post akan dihapus...',
+            return interaction.reply({
+                content: 'Channel tidak ditemukan.',
                 ephemeral: true
             });
 
-            await thread.delete();
         }
+
+        // Cek apakah forum/thread
+        if (
+            channel.type !== 11 &&
+            channel.type !== 12
+        ) {
+
+            return interaction.reply({
+                content: 'Gunakan command ini di dalam forum post.',
+                ephemeral: true
+            });
+
+        }
+
+        // Owner forum post
+        const isOwner =
+            channel.ownerId === interaction.user.id;
+
+        // Moderator
+        const isModerator =
+            interaction.member.permissions.has(
+                PermissionFlagsBits.ManageThreads
+            );
+
+        // Bukan owner/mod
+        if (!isOwner && !isModerator) {
+
+            return interaction.reply({
+                content: 'Kamu bukan pemilik forum post ini.',
+                ephemeral: true
+            });
+
+        }
+
+        await interaction.reply({
+            content: '🗑️ Forum post akan dihapus...',
+            ephemeral: true
+        });
+
+        // Hapus forum post
+        await channel.delete();
 
     } catch (error) {
 
