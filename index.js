@@ -58,8 +58,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.commandName !== 'delete') return;
 
         // Ambil forum post/thread
-        const channel =
-            await client.channels.fetch(interaction.channelId);
+        const channel = interaction.channel;
 
         console.log(channel);
 
