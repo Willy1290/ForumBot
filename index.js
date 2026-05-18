@@ -57,7 +57,8 @@ client.on('interactionCreate', async interaction => {
 
         if (interaction.commandName === 'delete') {
 
-            const thread = interaction.channel;
+            const thread =
+                await client.channels.fetch(interaction.channelId);
 
             if (!thread) {
 
