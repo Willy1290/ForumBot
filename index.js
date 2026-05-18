@@ -17,8 +17,8 @@ app.get('/', (req, res) => {
 app.listen(3000, () => {
     console.log('Web server aktif');
 });
-setTimeout(()) => {
-	console.log(('ping') => {
+setTimeout(() => {
+	console.log(('ping');
 	}, timer);
 
 const TOKEN = process.env.TOKEN;
