@@ -5,8 +5,10 @@ const {
     GatewayIntentBits,
     SlashCommandBuilder,
     REST,
-    Routes
+    Routes,
+	PermissionFlagsBits
 } = require('discord.js');
+
 app.get('/', (req, res) => {
     res.send('Bot aktif');
 });
