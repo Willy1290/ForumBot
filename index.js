@@ -25,7 +25,7 @@ const client = new Client({
     ]
 });
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log(`Login sebagai ${client.user.tag}`);
 
     const commands = [
@@ -50,40 +50,62 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
 
-    if (interaction.commandName === 'delete') {
+    try {
 
-        const thread = await interaction.channel.fetch();
+        if (!interaction.isChatInputCommand()) return;
 
-        // cek apakah forum/thread
-        if (!thread || !thread.isThread()) {
-            return interaction.reply({
-                content: 'Command ini hanya bisa dipakai di forum post.',
+        if (interaction.commandName === 'delete') {
+
+            const thread = interaction.channel;
+
+            if (!thread) {
+
+                return interaction.reply({
+                    content: 'Thread tidak ditemukan.',
+                    ephemeral: true
+                });
+
+            }
+
+            if (!thread.isThread()) {
+
+                return interaction.reply({
+                    content: 'Command ini hanya bisa dipakai di forum post.',
+                    ephemeral: true
+                });
+
+            }
+
+            const isOwner =
+                thread.ownerId === interaction.user.id;
+
+            const isModerator =
+                interaction.member.permissions.has(
+                    PermissionFlagsBits.ManageThreads
+                );
+
+            if (!isOwner && !isModerator) {
+
+                return interaction.reply({
+                    content: 'Kamu bukan pemilik forum post ini.',
+                    ephemeral: true
+                });
+
+            }
+
+            await interaction.reply({
+                content: 'Forum post akan dihapus...',
                 ephemeral: true
             });
+
+            await thread.delete();
         }
 
-        // cek owner
-        const isOwner = thread.ownerId === interaction.user.id;
+    } catch (error) {
 
-        // cek moderator
-        const isModerator =
-            interaction.member.permissions.has('ManageThreads');
+        console.error(error);
 
-        if (!isOwner && !isModerator) {
-            return interaction.reply({
-                content: 'Kamu bukan pemilik forum post ini.',
-                ephemeral: true
-            });
-        }
-
-        await interaction.reply({
-            content: 'Forum post akan dihapus...',
-            ephemeral: true
-        });
-
-        await thread.delete();
     }
 });
 
