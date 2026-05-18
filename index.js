@@ -1,6 +1,5 @@
 const express = require('express');
 const app = express();
-const timer = 30000;
 const {
     Client,
     GatewayIntentBits,
@@ -10,16 +9,13 @@ const {
 	PermissionFlagsBits
 } = require('discord.js');
 
-app.get('/', (req, res) => {
-    res.send('Bot aktif');
+app.get('/health', (_, res) => {
+    res.status(30000).send('Bot aktif');
 });
 
 app.listen(3000, () => {
     console.log('Web server aktif');
 });
-setTimeout(() => {
-	console.log(('ping');
-	}, timer);
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
