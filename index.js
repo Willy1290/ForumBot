@@ -106,14 +106,13 @@ client.on('interactionCreate', async interaction => {
             });
 
         }
-
-        await interaction.reply({
-            content: '🗑️ Forum post akan dihapus...',
+		await interaction.deferReply({
             ephemeral: true
         });
 
         // Hapus forum post
         await channel.delete();
+		content: '🗑️ Forum post akan dihapus...',
 
     } catch (error) {
 
@@ -121,4 +120,13 @@ client.on('interactionCreate', async interaction => {
 
     }
 });
+
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('Uncaught exception:', error);
+});
+
 client.login(TOKEN);
