@@ -140,6 +140,6 @@ setInterval(async () => {
         console.error('Self ping error:', error);
     }
 
-}, 30000);
+}, 300000);
 
 client.login(TOKEN);
