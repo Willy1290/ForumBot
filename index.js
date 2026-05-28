@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+const LOG_CHANNEL_ID = '1509601884980117544';
 const {
     Client,
     GatewayIntentBits,
@@ -49,7 +50,7 @@ client.once('clientReady', async () => {
         console.error(err);
     }
 });
-
+const deleteAttempts = new Map();
 client.on('interactionCreate', async interaction => {
 
     try {
@@ -99,15 +100,54 @@ client.on('interactionCreate', async interaction => {
         // Kalau bukan owner/mod
         if (!isOwner && !isModerator) {
 
-            return interaction.reply({
-                content: 'Kamu bukan pemilik forum post ini.',
-                ephemeral: true
-            });
+			const current =
+				deleteAttempts.get(interaction.user.id) || 0;
 
-        }
+			deleteAttempts.set(
+				interaction.user.id,
+				current + 1
+			);
+
+			const logChannel =
+				await client.channels.fetch(LOG_CHANNEL_ID);
+
+			if (logChannel) {
+
+				await logChannel.send(
+					`Ada yang coba delete\n` +
+					`User: ${interaction.user.tag}\n` +
+					`User ID: ${interaction.user.id}\n`+
+					`Thread: ${channel.name}\n` +
+					`Attempts: ${current + 1}`
+				);
+
+			}
+
+			return interaction.reply({
+				content: 'Kamu bukan pemilik forum post ini.',
+				ephemeral: true
+			});
+
+		}
+
 		await interaction.deferReply({
             ephemeral: true
         });
+		const logChannel =
+    await client.channels.fetch(LOG_CHANNEL_ID);
+
+		if (logChannel) {
+
+			await logChannel.send(
+				`Forum Terhapus\n` +
+				`Thread: ${channel.name}\n` +
+				`Deleted by: ${interaction.user.tag}\n` +
+				`User ID: ${interaction.user.id}\n` +
+				`Moderator: ${isModerator}\n` +
+				`Owner: ${isOwner}`
+			);
+
+		}
 
         // Hapus forum post
         await channel.delete();
