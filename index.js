@@ -1,13 +1,14 @@
 const express = require('express');
 const app = express();
-const LOG_CHANNEL_ID = '1509601884980117544';
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const {
     Client,
     GatewayIntentBits,
     SlashCommandBuilder,
     REST,
     Routes,
-	PermissionFlagsBits
+	PermissionFlagsBits,
+	EmbedBuilder
 } = require('discord.js');
 
 app.get('/health', (_, res) => {
@@ -112,15 +113,32 @@ client.on('interactionCreate', async interaction => {
 				await client.channels.fetch(LOG_CHANNEL_ID);
 
 			if (logChannel) {
+				const warnEmbed = new EmbedBuilder()
+					.setColor('Red')
+					.setTitle('⚠️ Unauthorized Delete Attempt')
+					.addFields(
+						{
+							name: 'User',
+							value: interaction.user.tag
+						},
+						{
+							name: 'User ID',
+							value: interaction.user.id
+						},
+						{
+							name: 'Thread',
+							value: channel.name
+						},
+						{
+							name: 'Attempts',
+							value: `${current + 1}`
+						}
+					)
+					.setTimestamp();
 
-				await logChannel.send(
-					`Ada yang coba delete\n` +
-					`User: ${interaction.user.tag}\n` +
-					`User ID: ${interaction.user.id}\n`+
-					`Thread: ${channel.name}\n` +
-					`Attempts: ${current + 1}`
-				);
-
+				await logChannel.send({
+					embeds: [warnEmbed]
+				});
 			}
 
 			return interaction.reply({
@@ -137,16 +155,34 @@ client.on('interactionCreate', async interaction => {
     await client.channels.fetch(LOG_CHANNEL_ID);
 
 		if (logChannel) {
-
-			await logChannel.send(
-				`Forum Terhapus\n` +
-				`Thread: ${channel.name}\n` +
-				`Deleted by: ${interaction.user.tag}\n` +
-				`User ID: ${interaction.user.id}\n` +
-				`Moderator: ${isModerator}\n` +
-				`Owner: ${isOwner}`
-			);
-
+			const deleteEmbed = new EmbedBuilder()
+				.setColor('Green')
+				.setTitle('🗑️ Forum Deleted')
+				.addFields(
+					{
+						name: 'Thread',
+						value: channel.name
+					},
+					{
+						name: 'Deleted By',
+						value: `${interaction.user.tag}`
+					},
+					{
+						name: 'User ID',
+						value: interaction.user.id
+					},
+					{
+						name: 'Moderator',
+						value: `${isModerator}`
+					},
+					{
+						name: 'Owner',
+						value: `${isOwner}`
+					}
+				)
+				.setTimestamp();
+			await logChannel.send({embeds: [deleteEmbed]
+			});
 		}
 
         // Hapus forum post
