@@ -13,8 +13,9 @@ const express = require('express');
 
 const { PrismaClient } = require('@prisma/client');
 
+console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+
 const prisma = new PrismaClient();
-console.log("DATABASE_URL =", process.env.DATABASE_URL);
 
 const app = express();
 
