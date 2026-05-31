@@ -13,7 +13,7 @@ const express = require('express');
 
 const { PrismaClient } = require('@prisma/client');
 
-console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+console.log("PrismaClient =", PrismaClient);
 
 const prisma = new PrismaClient();
 
