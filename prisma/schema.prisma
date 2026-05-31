@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -15,6 +15,7 @@ model WarnAttempt {
 
   id            Int       @id @default(autoincrement())
   userId        String
+  @@index([userId])
   createdAt     DateTime @default(now())
   user          DiscordUser @relation(fields: [userId],references: [id])
   threadName    String
