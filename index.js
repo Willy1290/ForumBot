@@ -1,221 +1,389 @@
-const express = require('express');
-const app = express();
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const {
     Client,
     GatewayIntentBits,
     SlashCommandBuilder,
     REST,
     Routes,
-	PermissionFlagsBits,
-	EmbedBuilder
+    PermissionFlagsBits,
+    EmbedBuilder,
+    ChannelType
 } = require('discord.js');
 
-app.get('/health', (_, res) => {
-    res.status(30000).send('Bot aktif');
+const express = require('express');
+
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+
+const app = express();
+
+app.get('/', (req, res) => {
+    res.send('Bot aktif');
 });
+
 app.listen(3000, () => {
     console.log('Web server aktif');
 });
 
 const TOKEN = process.env.TOKEN;
+
 const CLIENT_ID = process.env.CLIENT_ID;
+
+const GUILD_ID = process.env.GUILD_ID;
+
+const LOG_CHANNEL_ID =
+    process.env.LOG_CHANNEL_ID;
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
     ]
 });
 
+// =========================
+// SLASH COMMAND
+// =========================
+
+const commands = [
+    new SlashCommandBuilder()
+        .setName('delete')
+        .setDescription(
+            'Hapus forum post milikmu'
+        )
+].map(command => command.toJSON());
+
+const rest = new REST({
+    version: '10'
+}).setToken(TOKEN);
+
+// =========================
+// READY
+// =========================
+
 client.once('clientReady', async () => {
-    console.log(`Login sebagai ${client.user.tag}`);
 
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('delete')
-            .setDescription('Hapus forum post milikmu')
-            .toJSON()
-    ];
-
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    console.log(
+        `Login sebagai ${client.user.tag}`
+    );
 
     try {
+
         await rest.put(
-            Routes.applicationCommands(CLIENT_ID),
-            { body: commands }
+            Routes.applicationGuildCommands(
+                CLIENT_ID,
+                GUILD_ID
+            ),
+            {
+                body: commands
+            }
         );
 
-        console.log('Slash command berhasil dibuat');
-    } catch (err) {
-        console.error(err);
+        console.log(
+            'Slash command berhasil dibuat'
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
     }
+
 });
-const deleteAttempts = new Map();
-client.on('interactionCreate', async interaction => {
 
-    try {
+// =========================
+// INTERACTION
+// =========================
 
-        if (!interaction.isChatInputCommand()) return;
+client.on(
+    'interactionCreate',
+    async interaction => {
 
-        if (interaction.commandName !== 'delete') return;
+        try {
 
-        // Ambil forum post/thread
-        const channel = interaction.channel;
+            if (
+                !interaction.isChatInputCommand()
+            ) return;
 
-        console.log(channel);
+            if (
+                interaction.commandName !==
+                'delete'
+            ) return;
 
-        // Kalau gagal ambil channel
-        if (!channel) {
+            const channel =
+                await client.channels.fetch(
+                    interaction.channelId
+                );
 
-            return interaction.reply({
-                content: 'Channel tidak ditemukan.',
+            if (!channel) {
+
+                return interaction.reply({
+                    content:
+                        'Channel tidak ditemukan.',
+                    ephemeral: true
+                });
+
+            }
+
+            // Pastikan forum/thread
+            if (
+                channel.type !==
+                    ChannelType.PublicThread &&
+                channel.type !==
+                    ChannelType.PrivateThread
+            ) {
+
+                return interaction.reply({
+                    content:
+                        'Gunakan command ini di forum post.',
+                    ephemeral: true
+                });
+
+            }
+
+            // Owner
+            const isOwner =
+                channel.ownerId ===
+                interaction.user.id;
+
+            // Moderator
+            const isModerator =
+                interaction.member.permissions.has(
+                    PermissionFlagsBits.ManageThreads
+                );
+
+            // =========================
+            // UNAUTHORIZED
+            // =========================
+
+            if (!isOwner && !isModerator) {
+
+                // Cari user
+                let user =
+                    await prisma.discordUser.findUnique(
+                        {
+                            where: {
+                                id:
+                                    interaction.user
+                                        .id
+                            }
+                        }
+                    );
+
+                // Kalau belum ada
+                if (!user) {
+
+                    user =
+                        await prisma.discordUser.create(
+                            {
+                                data: {
+                                    id:
+                                        interaction
+                                            .user.id,
+
+                                    username:
+                                        interaction
+                                            .user
+                                            .tag
+                                }
+                            }
+                        );
+
+                }
+
+                // Hitung violations
+                const totalAttempts =
+                    await prisma.warnAttempt.count(
+                        {
+                            where: {
+                                userId:
+                                    interaction
+                                        .user.id
+                            }
+                        }
+                    );
+
+                // Simpan warn
+                await prisma.warnAttempt.create(
+                    {
+                        data: {
+
+                            userId:
+                                interaction
+                                    .user.id,
+
+                            threadName:
+                                channel.name,
+
+                            attemptCount:
+                                totalAttempts +
+                                1
+                        }
+                    }
+                );
+
+                // Log channel
+                const logChannel =
+                    await client.channels.fetch(
+                        LOG_CHANNEL_ID
+                    );
+
+                // Embed merah
+                if (logChannel) {
+
+                    const warnEmbed =
+                        new EmbedBuilder()
+                            .setColor('Red')
+                            .setTitle(
+                                '⚠️ Unauthorized Delete Attempt'
+                            )
+                            .addFields(
+                                {
+                                    name: 'User',
+                                    value:
+                                        interaction
+                                            .user
+                                            .tag
+                                },
+                                {
+                                    name: 'User ID',
+                                    value:
+                                        interaction
+                                            .user.id
+                                },
+                                {
+                                    name: 'Thread',
+                                    value:
+                                        channel.name
+                                },
+                                {
+                                    name: 'Violations',
+                                    value: `${totalAttempts + 1}`
+                                }
+                            )
+                            .setTimestamp();
+
+                    await logChannel.send({
+                        embeds: [warnEmbed]
+                    });
+
+                }
+
+                return interaction.reply({
+                    content:
+                        'Kamu bukan pemilik forum post ini.',
+                    ephemeral: true
+                });
+
+            }
+
+            // =========================
+            // DELETE SUCCESS
+            // =========================
+
+            await interaction.deferReply({
                 ephemeral: true
             });
 
-        }
+            const logChannel =
+                await client.channels.fetch(
+                    LOG_CHANNEL_ID
+                );
 
-        // Cek apakah thread/forum post
-        if (
-            channel.type !== 11 &&
-            channel.type !== 12
-        ) {
+            // Embed hijau
+            if (logChannel) {
 
-            return interaction.reply({
-                content: 'Gunakan command ini di dalam forum post.',
-                ephemeral: true
-            });
+                const deleteEmbed =
+                    new EmbedBuilder()
+                        .setColor('Green')
+                        .setTitle(
+                            '🗑️ Forum Deleted'
+                        )
+                        .addFields(
+                            {
+                                name: 'Thread',
+                                value:
+                                    channel.name
+                            },
+                            {
+                                name: 'Deleted By',
+                                value:
+                                    interaction
+                                        .user.tag
+                            },
+                            {
+                                name: 'User ID',
+                                value:
+                                    interaction
+                                        .user.id
+                            },
+                            {
+                                name: 'Moderator',
+                                value: `${isModerator}`
+                            },
+                            {
+                                name: 'Owner',
+                                value: `${isOwner}`
+                            }
+                        )
+                        .setTimestamp();
 
-        }
+                await logChannel.send({
+                    embeds: [deleteEmbed]
+                });
 
-        // Cek owner
-        const isOwner =
-            channel.ownerId === interaction.user.id;
+            }
 
-        // Cek moderator
-        const isModerator =
-            interaction.member.permissions.has(
-                PermissionFlagsBits.ManageThreads
+            // Hapus thread
+            await channel.delete();
+
+            console.log(
+                'Forum berhasil dihapus'
             );
 
-        // Kalau bukan owner/mod
-        if (!isOwner && !isModerator) {
+        } catch (error) {
 
-			const current =
-				deleteAttempts.get(interaction.user.id) || 0;
+            console.error(
+                'ERROR:',
+                error
+            );
 
-			deleteAttempts.set(
-				interaction.user.id,
-				current + 1
-			);
+        }
 
-			const logChannel =
-				await client.channels.fetch(LOG_CHANNEL_ID);
-
-			if (logChannel) {
-				const warnEmbed = new EmbedBuilder()
-					.setColor('Red')
-					.setTitle('⚠️ Unauthorized Delete Attempt')
-					.addFields(
-						{
-							name: 'User',
-							value: interaction.user.tag
-						},
-						{
-							name: 'User ID',
-							value: interaction.user.id
-						},
-						{
-							name: 'Thread',
-							value: channel.name
-						},
-						{
-							name: 'Attempts',
-							value: `${current + 1}`
-						}
-					)
-					.setTimestamp();
-
-				await logChannel.send({
-					embeds: [warnEmbed]
-				});
-			}
-
-			return interaction.reply({
-				content: 'Kamu bukan pemilik forum post ini.',
-				ephemeral: true
-			});
-
-		}
-
-		await interaction.deferReply({
-            ephemeral: true
-        });
-		const logChannel =
-    await client.channels.fetch(LOG_CHANNEL_ID);
-
-		if (logChannel) {
-			const deleteEmbed = new EmbedBuilder()
-				.setColor('Green')
-				.setTitle('🗑️ Forum Deleted')
-				.addFields(
-					{
-						name: 'Thread',
-						value: channel.name
-					},
-					{
-						name: 'Deleted By',
-						value: `${interaction.user.tag}`
-					},
-					{
-						name: 'User ID',
-						value: interaction.user.id
-					},
-					{
-						name: 'Moderator',
-						value: `${isModerator}`
-					},
-					{
-						name: 'Owner',
-						value: `${isOwner}`
-					}
-				)
-				.setTimestamp();
-			await logChannel.send({embeds: [deleteEmbed]
-			});
-		}
-
-        // Hapus forum post
-        await channel.delete();
-		console.log('Forum post akan dihapus');
-
-    } catch (error) {
-
-        console.error('ERROR:', error);
     }
-});
+);
 
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
-});
+// =========================
+// ERROR HANDLER
+// =========================
 
-process.on('uncaughtException', error => {
-    console.error('Uncaught exception:', error);
-});
+process.on(
+    'unhandledRejection',
+    error => {
 
-setInterval(async () => {
-
-    try {
-        const response = await fetch(
-            'https://forumbot-dqqe.onrender.com/'
+        console.error(
+            'Unhandled promise rejection:',
+            error
         );
-        console.log(
-            `Self ping: ${response.status}`
-        );
-    } catch (error) {
-        console.error('Self ping error:', error);
+
     }
+);
 
-}, 300000);
+process.on(
+    'uncaughtException',
+    error => {
+
+        console.error(
+            'Uncaught exception:',
+            error
+        );
+
+    }
+);
+
+// =========================
+// LOGIN
+// =========================
 
 client.login(TOKEN);

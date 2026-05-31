@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+model DiscordUser {
+  id            String    @id
+  username      String
+  violations    WarnAttempt[]
+}
+model WarnAttempt {
+
+  id            Int       @id @default(autoincrement())
+  userId        String
+  createdAt     DateTime @default(now())
+  user          DiscordUser @relation(fields: [userId],references: [id])
+  threadName    String
+  attemptCount  Int
+}
