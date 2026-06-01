@@ -11,11 +11,12 @@ const {
 
 const express = require('express');
 
-const { PrismaClient } = require('@prisma/client');
+console.log(
+  "DATABASE_URL exists:",
+  !!process.env.DATABASE_URL
+);
 
-console.log("PrismaClient =", PrismaClient);
-
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({});
 
 const app = express();
 
@@ -43,6 +44,9 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
+console.log(
+  require('@prisma/client/package.json').version
+);
 
 // =========================
 // SLASH COMMAND
