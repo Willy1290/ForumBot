@@ -65,11 +65,21 @@ console.log(
 // =========================
 
 const commands = [
+
     new SlashCommandBuilder()
         .setName('delete')
-        .setDescription(
-            'Hapus forum post milikmu'
+        .setDescription('Hapus forum post milikmu'),
+
+    new SlashCommandBuilder()
+        .setName('search')
+        .setDescription('Cari riwayat pelanggaran user')
+        .addStringOption(option =>
+            option
+                .setName('user')
+                .setDescription('User ID atau username')
+                .setRequired(true)
         )
+
 ].map(command => command.toJSON());
 
 const rest = new REST({
@@ -120,9 +130,149 @@ client.on(
 
         try {
 
-            if (
-                !interaction.isChatInputCommand()
-            ) return;
+            if (!interaction.isChatInputCommand())
+				return;
+
+			if (interaction.commandName === 'search') {
+
+				// Hanya admin
+				if (
+					!interaction.member.permissions.has(
+						PermissionFlagsBits.Administrator
+					)
+				) {
+
+					return interaction.reply({
+						content:
+							'Hanya admin yang dapat menggunakan command ini.',
+						ephemeral: true
+					});
+
+				}
+
+				const query =
+					interaction.options.getString(
+						'user'
+					);
+
+				const user =
+					await prisma.discordUser.findFirst(
+						{
+							where: {
+								OR: [
+									{
+										id: query
+									},
+									{
+										username: {
+											contains:
+												query
+										}
+									}
+								]
+							}
+						}
+					);
+
+				if (!user) {
+
+					return interaction.reply({
+						content:
+							'User tidak ditemukan dalam database.',
+						ephemeral: true
+					});
+
+				}
+
+				const totalAttempts =
+					await prisma.warnAttempt.count({
+						where: {
+							userId: user.id
+						}
+					});
+
+				const history =
+					await prisma.warnAttempt.findMany({
+						where: {
+							userId: user.id
+						},
+						orderBy: {
+							createdAt: 'desc'
+						},
+						take: 10
+					});
+
+				let historyText = '';
+
+				if (history.length === 0) {
+
+					historyText =
+						'Tidak ada riwayat.';
+
+				} else {
+
+					history.forEach(
+						(attempt, index) => {
+
+							historyText +=
+								`${index + 1}. ${attempt.threadName}\n` +
+								`Count: ${attempt.attemptCount}\n` +
+								`Date: <t:${Math.floor(
+									attempt.createdAt.getTime() /
+									1000
+								)}:F>\n\n`;
+
+						}
+					);
+
+				}
+
+				const embed =
+					new EmbedBuilder()
+						.setColor('Orange')
+						.setTitle(
+							'🔍 Violation Search'
+						)
+						.addFields(
+							{
+								name: 'Username',
+								value:
+									user.username
+							},
+							{
+								name: 'User ID',
+								value:
+									user.id
+							},
+							{
+								name:
+									'Total Delete Attempts',
+								value:
+									`${totalAttempts}`
+							},
+							{
+								name:
+									'Recent History',
+								value:
+									historyText.slice(
+										0,
+										1024
+									)
+							}
+						)
+						.setTimestamp();
+
+				return interaction.reply({
+					embeds: [embed],
+					ephemeral: true
+				});
+
+			}
+
+			if (
+				interaction.commandName !==
+				'delete'
+			) return;
 
             if (
                 interaction.commandName !==
