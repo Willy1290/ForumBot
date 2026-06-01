@@ -8,6 +8,8 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "discord.js": "^14.26.4",
     "effect": "^3.21.2",
