@@ -12,12 +12,23 @@ const {
 const express = require('express');
 
 const { PrismaClient } = require('@prisma/client');
+const { PrismaNeon } = require('@prisma/adapter-neon');
+const { Pool } = require('@neondatabase/serverless');
+
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL
+});
+
+const adapter = new PrismaNeon(pool);
+
+const prisma = new PrismaClient({
+    adapter
+});
 
 console.log(
   "DATABASE_URL exists:",
   !!process.env.DATABASE_URL
 );
-const prisma = new PrismaClient({});
 
 const app = express();
 
