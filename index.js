@@ -453,6 +453,11 @@ client.on(
             await interaction.deferReply({
                 ephemeral: true
             });
+			await interaction.editReply({
+				content: 'Forum berhasil dihapus.'
+			});
+
+			await channel.delete();
 
             const logChannel =
                 await client.channels.fetch(
