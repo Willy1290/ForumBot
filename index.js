@@ -35,6 +35,21 @@ app.listen(3000, () => {
     console.log('Web server aktif');
 });
 
+// =========================
+// KEEP-ALIVE (anti-sleep Render)
+// =========================
+
+const RENDER_URL = process.env.RENDER_URL || 'http://localhost:3000';
+
+setInterval(async () => {
+    try {
+        const res = await fetch(RENDER_URL);
+        console.log(`[Keep-alive] Ping OK — ${new Date().toISOString()}`);
+    } catch (error) {
+        console.error('[Keep-alive] Ping gagal:', error.message);
+    }
+}, 60 * 1000); // setiap 1 menit
+
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
@@ -48,17 +63,6 @@ const client = new Client({
         GatewayIntentBits.Guilds
     ]
 });
- 
-const RENDER_URL = process.env.RENDER_URL || 'http://localhost:3000';
- 
-setInterval(async () => {
-    try {
-        const res = await fetch(RENDER_URL);
-        console.log(`[Keep-alive] Ping OK — ${new Date().toISOString()}`);
-    } catch (error) {
-        console.error('[Keep-alive] Ping gagal:', error.message);
-    }
-}, 60 * 1000); 
 
 console.log(require('@prisma/client/package.json').version);
 
@@ -80,6 +84,12 @@ const commands = [
                 .setName('user')
                 .setDescription('User ID atau username')
                 .setRequired(true)
+        )
+        // Hanya terlihat & bisa dipakai oleh Mod (ManageThreads) atau Admin
+        // User biasa tidak akan melihat command ini sama sekali
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.ManageThreads |
+            PermissionFlagsBits.Administrator
         )
 
 ].map(command => command.toJSON());
