@@ -48,6 +48,17 @@ const client = new Client({
         GatewayIntentBits.Guilds
     ]
 });
+ 
+const RENDER_URL = process.env.RENDER_URL || 'http://localhost:3000';
+ 
+setInterval(async () => {
+    try {
+        const res = await fetch(RENDER_URL);
+        console.log(`[Keep-alive] Ping OK — ${new Date().toISOString()}`);
+    } catch (error) {
+        console.error('[Keep-alive] Ping gagal:', error.message);
+    }
+}, 60 * 1000); 
 
 console.log(require('@prisma/client/package.json').version);
 
