@@ -57,10 +57,13 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
 const client = new Client({
     intents: [
-        // FIX 1: Hapus GuildMessages & MessageContent — tidak dipakai dan
-        // MessageContent butuh Privileged Intent di Developer Portal.
-        // Untuk slash command bot, Guilds sudah cukup.
-        GatewayIntentBits.Guilds
+        GatewayIntentBits.Guilds,
+        // Diperlukan lagi untuk fitur anti-spam attachment lintas channel:
+        // bot perlu baca pesan & attachment yang masuk di semua channel.
+        // PENTING: Aktifkan "MESSAGE CONTENT INTENT" di Discord Developer
+        // Portal -> Bot -> Privileged Gateway Intents, atau bot akan error saat login.
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
     ]
 });
 
@@ -326,6 +329,104 @@ client.on('interactionCreate', async interaction => {
 
     } catch (error) {
         console.error(error);
+    }
+
+});
+
+// =========================
+// ANTI-SPAM: Attachment Lintas Channel
+// =========================
+// Jika satu user kirim attachment ke 2+ channel berbeda dalam 5 detik,
+// dianggap spam/scam bot -> ban permanen + hapus semua pesan attachment tadi.
+
+const ATTACHMENT_WINDOW_MS = 2 * 1000; 
+const MIN_CHANNELS = 2;                
+
+// Menyimpan jejak attachment per user: userId -> [{ channelId, messageId, timestamp }]
+const attachmentTracker = new Map();
+
+client.on('messageCreate', async message => {
+
+    try {
+
+        // Abaikan bot & pesan tanpa attachment
+        if (message.author.bot) return;
+        if (message.attachments.size === 0) return;
+
+        const userId = message.author.id;
+        const now = Date.now();
+
+        // Ambil/inisialisasi jejak user ini
+        let records = attachmentTracker.get(userId) || [];
+
+        // Buang record yang sudah lewat window waktu
+        records = records.filter(r => now - r.timestamp <= ATTACHMENT_WINDOW_MS);
+
+        // Tambah record baru untuk pesan ini
+        records.push({
+            channelId: message.channelId,
+            messageId: message.id,
+            timestamp: now
+        });
+
+        attachmentTracker.set(userId, records);
+
+        // Hitung jumlah channel UNIK dalam window waktu
+        const uniqueChannels = new Set(records.map(r => r.channelId));
+
+        if (uniqueChannels.size >= MIN_CHANNELS) {
+
+            // Hapus jejak user supaya tidak ke-trigger berkali-kali
+            attachmentTracker.delete(userId);
+
+            // Hapus semua pesan attachment yang terdeteksi tadi
+            for (const record of records) {
+                try {
+                    const ch = await client.channels.fetch(record.channelId);
+                    const msg = await ch.messages.fetch(record.messageId);
+                    await msg.delete();
+                } catch (deleteError) {
+                    console.error(
+                        `Gagal hapus pesan ${record.messageId} di channel ${record.channelId}:`,
+                        deleteError.message
+                    );
+                }
+            }
+
+            // Ban permanen
+            try {
+                await message.guild.members.ban(userId, {
+                    reason: `Auto-ban: spam attachment di ${uniqueChannels.size} channel berbeda dalam ${ATTACHMENT_WINDOW_MS / 1000} detik`
+                });
+            } catch (banError) {
+                console.error('Gagal ban user:', banError.message);
+            }
+
+            // Log ke channel log
+            const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+
+            if (logChannel) {
+                const spamEmbed = new EmbedBuilder()
+                    .setColor('DarkRed')
+                    .setTitle('Auto-Ban: Spam Attachment Terdeteksi')
+                    .addFields(
+                        { name: 'User', value: message.author.tag },
+                        { name: 'User ID', value: userId },
+                        { name: 'Jumlah Channel', value: `${uniqueChannels.size}` },
+                        { name: 'Pesan Dihapus', value: `${records.length}` },
+                        { name: 'Window Waktu', value: `${ATTACHMENT_WINDOW_MS / 1000} detik` }
+                    )
+                    .setTimestamp();
+
+                await logChannel.send({ embeds: [spamEmbed] });
+            }
+
+            console.log(`Auto-ban: ${message.author.tag} (${userId}) — spam attachment di ${uniqueChannels.size} channel`);
+
+        }
+
+    } catch (error) {
+        console.error('Error di anti-spam attachment:', error);
     }
 
 });
