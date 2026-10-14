@@ -82,7 +82,7 @@ const REFERENCE_HASHES = [
 const PHASH_THRESHOLD = 3;
 
 // true = hanya mendeteksi dan mencatat, belum menghapus.
-const PHASH_DRY_RUN = true;
+const PHASH_DRY_RUN = false;
 
 // Menghitung pHash dari URL gambar.
 async function getImageHash(url) {
@@ -354,7 +354,48 @@ client.on('interactionCreate', async interaction => {
 
         }
 		
-		client.on("messageCreate", async (message) => {
+		
+        // =========================
+        // DELETE SUCCESS
+        // =========================
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
+
+        // FIX 5: Kirim log SEBELUM delete channel, karena setelah channel
+        // dihapus kita masih bisa kirim ke logChannel (channel berbeda).
+        // Dan channel.delete() hanya dipanggil SEKALI (sebelumnya dipanggil dua kali).
+        if (logChannel) {
+            const deleteEmbed = new EmbedBuilder()
+                .setColor('Green')
+                .setTitle('🗑️ Forum Deleted')
+                .addFields(
+                    { name: 'Thread', value: channel.name },
+                    { name: 'Deleted By', value: interaction.user.tag },
+                    { name: 'User ID', value: interaction.user.id },
+                    { name: 'Moderator', value: `${isModerator}` },
+                    { name: 'Owner', value: `${isOwner}` }
+                )
+                .setTimestamp();
+
+            await logChannel.send({ embeds: [deleteEmbed] });
+        }
+
+        // Edit reply dulu sebelum channel dihapus
+        await interaction.editReply({ content: 'Forum berhasil dihapus.' });
+
+        // Hapus channel — hanya sekali
+        await channel.delete();
+
+        console.log('Forum berhasil dihapus');
+
+    } catch (error) {
+        console.error(error);
+    }
+
+});
+client.on("messageCreate", async (message) => {
   // Abaikan pesan dari bot.
   if (message.author.bot) return;
 
@@ -419,46 +460,6 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-        // =========================
-        // DELETE SUCCESS
-        // =========================
-
-        await interaction.deferReply({ ephemeral: true });
-
-        const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
-
-        // FIX 5: Kirim log SEBELUM delete channel, karena setelah channel
-        // dihapus kita masih bisa kirim ke logChannel (channel berbeda).
-        // Dan channel.delete() hanya dipanggil SEKALI (sebelumnya dipanggil dua kali).
-        if (logChannel) {
-            const deleteEmbed = new EmbedBuilder()
-                .setColor('Green')
-                .setTitle('🗑️ Forum Deleted')
-                .addFields(
-                    { name: 'Thread', value: channel.name },
-                    { name: 'Deleted By', value: interaction.user.tag },
-                    { name: 'User ID', value: interaction.user.id },
-                    { name: 'Moderator', value: `${isModerator}` },
-                    { name: 'Owner', value: `${isOwner}` }
-                )
-                .setTimestamp();
-
-            await logChannel.send({ embeds: [deleteEmbed] });
-        }
-
-        // Edit reply dulu sebelum channel dihapus
-        await interaction.editReply({ content: 'Forum berhasil dihapus.' });
-
-        // Hapus channel — hanya sekali
-        await channel.delete();
-
-        console.log('Forum berhasil dihapus');
-
-    } catch (error) {
-        console.error(error);
-    }
-
-});
 
 // =========================
 // ANTI-SPAM: Attachment Lintas Channel
