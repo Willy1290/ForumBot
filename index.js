@@ -10,7 +10,8 @@ const {
 } = require('discord.js');
 
 const express = require('express');
-
+const phash = require("sharp-phash");
+const distance = require("sharp-phash/distance");
 const { PrismaClient } = require('@prisma/client');
 const { PrismaNeon } = require('@prisma/adapter-neon');
 const { Pool } = require('@neondatabase/serverless');
@@ -69,6 +70,61 @@ const client = new Client({
 });
 
 console.log(require('@prisma/client/package.json').version);
+
+const REFERENCE_HASHES = [];
+
+// Semakin kecil nilainya, semakin ketat pencocokannya.
+const PHASH_THRESHOLD = 3;
+
+// true = hanya mendeteksi dan mencatat, belum menghapus.
+const PHASH_DRY_RUN = true;
+
+// Menghitung pHash dari URL gambar.
+async function getImageHash(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Gagal mengambil gambar: HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.startsWith("image/")) {
+    throw new Error("URL tersebut bukan file gambar.");
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  // Batasi ukuran gambar agar bot tidak memproses file terlalu besar.
+  if (buffer.length > 8 * 1024 * 1024) {
+    throw new Error("Ukuran gambar melebihi 8 MB.");
+  }
+
+  return await phash(buffer);
+}
+
+// Mencari referensi dengan jarak hash paling kecil.
+function findMatchingHash(newHash) {
+  let bestDistance = Infinity;
+
+  for (const referenceHash of REFERENCE_HASHES) {
+    if (!/^[01]{64}$/.test(referenceHash)) {
+      console.warn("Ada hash referensi yang formatnya tidak valid.");
+      continue;
+    }
+
+    const currentDistance = distance(newHash, referenceHash);
+
+    if (currentDistance < bestDistance) {
+      bestDistance = currentDistance;
+    }
+  }
+
+  return {
+    matched: bestDistance <= PHASH_THRESHOLD,
+    distance: bestDistance,
+  };
+}
 
 // =========================
 // SLASH COMMAND
@@ -292,6 +348,71 @@ client.on('interactionCreate', async interaction => {
             });
 
         }
+		
+		client.on("messageCreate", async (message) => {
+  // Abaikan pesan dari bot.
+  if (message.author.bot) return;
+
+  // Mode percobaan: kirim !phash bersama satu gambar.
+  if (message.content.trim() === "!phash") {
+    const attachment = message.attachments.find((file) =>
+      file.contentType?.startsWith("image/")
+    );
+
+    if (!attachment) {
+      await message.reply("Lampirkan satu gambar bersama perintah !phash.");
+      return;
+    }
+
+    try {
+      const hash = await getImageHash(attachment.url);
+
+      await message.reply({
+        content: `Hash gambar referensi:\n\`${hash}\``,
+        allowedMentions: { repliedUser: false },
+      });
+    } catch (error) {
+      console.error("Gagal menghitung hash:", error);
+      await message.reply("Gagal menghitung hash gambar.");
+    }
+
+    return;
+  }
+
+  // Periksa gambar yang dikirim dalam pesan biasa.
+  const images = message.attachments.filter((file) =>
+    file.contentType?.startsWith("image/")
+  );
+
+  if (images.size === 0 || REFERENCE_HASHES.length === 0) return;
+
+  for (const image of images.values()) {
+    try {
+      const newHash = await getImageHash(image.url);
+      const result = findMatchingHash(newHash);
+
+      if (!result.matched) continue;
+
+      console.log(
+        `[pHash] Gambar mirip terdeteksi! ` +
+        `User: ${message.author.tag}, ` +
+        `Jarak hash: ${result.distance}, ` +
+        `Pesan: ${message.id}`
+      );
+
+      if (PHASH_DRY_RUN) {
+        console.log("[pHash] DRY RUN: pesan belum dihapus.");
+        continue;
+      }
+
+      // Penghapusan otomatis akan diaktifkan pada tahap berikutnya.
+      await message.delete();
+      break;
+    } catch (error) {
+      console.error("[pHash] Gagal memproses gambar:", error);
+    }
+  }
+});
 
         // =========================
         // DELETE SUCCESS
