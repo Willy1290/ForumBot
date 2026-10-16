@@ -1,39 +1,45 @@
-const fs = require("node:fs");
-const path = require("node:path");
+const fs = require("fs");
+const path = require("path");
 const phash = require("sharp-phash");
 
+const IMAGE_DIR = path.join(__dirname, "images");
+
+const SUPPORTED_EXTENSIONS = [
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp"
+];
+
 async function main() {
-  const imageFiles = [
-    "mrbeast1.png",
-    "mrbeast2.png",
-    "mrbeast3.png",
-    "mrbeast4.png",
-  ];
-
-  const hashes = [];
-
-  for (const file of imageFiles) {
-    const imagePath = path.join("images", file);
-
-    try {
-      const buffer = fs.readFileSync(imagePath);
-      const hash = await phash(buffer);
-
-      hashes.push(hash);
-      console.log(`${file}: ${hash}`);
-    } catch (error) {
-      console.error(`Gagal memproses ${file}:`, error.message);
+    if (!fs.existsSync(IMAGE_DIR)) {
+        console.error(`Folder tidak ditemukan: ${IMAGE_DIR}`);
+        process.exitCode = 1;
+        return;
     }
-  }
 
-  console.log("\nSalin ke index.js:\n");
-  console.log("const REFERENCE_HASHES = [");
+    const files = fs.readdirSync(IMAGE_DIR)
+        .filter(file =>
+            SUPPORTED_EXTENSIONS.includes(
+                path.extname(file).toLowerCase()
+            )
+        );
 
-  for (const hash of hashes) {
-    console.log(`  "${hash}",`);
-  }
+    const hashes = [];
 
-  console.log("];");
+    for (const file of files) {
+        try {
+            const hash = await phash(path.join(IMAGE_DIR, file));
+
+            hashes.push(hash);
+            console.log(`Diproses: ${file}`);
+        } catch (error) {
+            console.error(`Gagal memproses ${file}:`, error.message);
+        }
+    }
+
+    console.log("\nconst REFERENCE_HASHES = [");
+	for (const hash of hashes){
+		console.log(`	"${hash}",`);
+	}
+	console.log("];");
+	console.log(`\nSelesai! ${hashes.length} gambar diproses.`);
 }
-
-main();
+main().catch(console.error);
