@@ -89,7 +89,7 @@ const REFERENCE_HASHES = [
         "1101101111000100001001001101101100100100111001001101101100000000",
         "0110011001100011100110011100011010010001110010010000101001100110",
         "1000111000111100100001000111011101110011011100110111001101110001",
-];
+];;
 
 // Semakin kecil nilainya, semakin ketat pencocokannya.
 const PHASH_THRESHOLD = 3;
@@ -408,168 +408,278 @@ client.on('interactionCreate', async interaction => {
     }
 
 });
-client.on("messageCreate", async (message) => {
-  // Abaikan pesan dari bot.
-  if (message.author.bot) return;
+// =========================
+// AUTO MODERATION GAMBAR: DATASET + CROSS-CHANNEL
+// =========================
+const ATTACHMENT_WINDOW_MS = 2 * 1000;
+const MIN_CHANNELS = 3;
+// In-memory tracker; reset ketika bot restart/redeploy.
+const attachmentTracker = new Map();
+// Mencegah dua listener memproses pesan yang sama secara bersamaan.
+const processingMessages = new Set();
+const processingUsers = new Set();
 
-  // Mode percobaan: kirim !phash bersama satu gambar.
-  if (message.content.trim() === "!phash") {
-    const attachment = message.attachments.find((file) =>
-      file.contentType?.startsWith("image/")
-    );
+function isImageAttachment(file) {
+  return Boolean(file.contentType?.startsWith('image/')) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(file.name || '');
+}
 
-    if (!attachment) {
-      await message.reply("Lampirkan satu gambar bersama perintah !phash.");
-      return;
-    }
+async function getMemberForMessage(message) {
+  if (!message.guild) return null;
+  return message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+}
 
+function isExemptFromAutoModeration(message, member) {
+  if (!message.guild || !member) return false;
+  if (message.author.id === message.guild.ownerId) return true;
+  return member.permissions.has(PermissionFlagsBits.Administrator) ||
+    member.permissions.has(PermissionFlagsBits.ManageThreads);
+}
+
+async function getLogChannel() {
+  if (!LOG_CHANNEL_ID) throw new Error('LOG_CHANNEL_ID belum diatur.');
+  const channel = await client.channels.fetch(LOG_CHANNEL_ID);
+  if (!channel || !channel.isTextBased() || !channel.send) {
+    throw new Error('LOG_CHANNEL_ID bukan channel teks yang dapat mengirim pesan.');
+  }
+  return channel;
+}
+
+function makeImageEvidenceEmbed(record, title, color, extraFields = []) {
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .addFields(
+      { name: 'User', value: `${record.authorTag || 'Unknown'} (${record.userId})` },
+      { name: 'Channel', value: `<#${record.channelId}>` },
+      { name: 'Message ID', value: record.messageId },
+      { name: 'Waktu', value: `<t:${Math.floor(record.timestamp / 1000)}:F>` },
+      { name: 'pHash', value: `\`${record.hash}\`` },
+      ...extraFields
+    )
+    .setTimestamp(new Date(record.timestamp));
+  if (record.imageUrl) embed.setImage(record.imageUrl);
+  return embed;
+}
+
+async function logEvidenceBeforeAction(title, color, records, extraFieldsByIndex = []) {
+  const logChannel = await getLogChannel();
+  const embeds = records.map((record, index) => makeImageEvidenceEmbed(
+    record, title, color, extraFieldsByIndex[index] || []
+  ));
+  // Kirim bukti dahulu. Jika log gagal, caller tidak boleh menghapus/softban.
+  await logChannel.send({ embeds });
+}
+
+async function deleteTrackedMessages(records) {
+  const failures = [];
+  for (const record of records) {
     try {
-      const hash = await getImageHash(attachment.url);
-
-      await message.reply({
-        content: `Hash gambar referensi:\n\`${hash}\``,
-        allowedMentions: { repliedUser: false },
-      });
+      const channel = await client.channels.fetch(record.channelId);
+      const msg = await channel.messages.fetch(record.messageId);
+      await msg.delete();
     } catch (error) {
-      console.error("Gagal menghitung hash:", error);
-      await message.reply("Gagal menghitung hash gambar.");
+      failures.push(`${record.messageId}: ${error.message}`);
+      console.error(`[AutoMod] Gagal menghapus pesan ${record.messageId}:`, error.message);
     }
+  }
+  return failures;
+}
 
+async function softbanUser(guild, userId, reason) {
+  // Softban = ban tanpa menghapus histori pesan secara massal, lalu langsung unban.
+  await guild.members.ban(userId, { deleteMessageSeconds: 0, reason });
+  try {
+    await guild.members.unban(userId, `Softban selesai: ${reason}`);
+    return { success: true, unbanFailed: false };
+  } catch (error) {
+    console.error(`[AutoMod] User ${userId} berhasil diban tetapi gagal di-unban:`, error.message);
+    return { success: false, unbanFailed: true, error: error.message };
+  }
+}
+
+async function handleDatasetMatch(message, record, match) {
+  const member = await getMemberForMessage(message);
+  if (isExemptFromAutoModeration(message, member)) {
+    console.log(`[pHash] Dataset match, tetapi user exempt: ${message.author.tag} (${message.author.id})`);
+    return;
+  }
+  if (PHASH_DRY_RUN) {
+    console.log(`[pHash] DRY RUN: dataset match ${message.id}; tidak ada tindakan.`);
     return;
   }
 
-  // Periksa gambar yang dikirim dalam pesan biasa.
-  const images = message.attachments.filter((file) =>
-    file.contentType?.startsWith("image/")
-  );
+  const reference = REFERENCE_HASHES.reduce((best, hash) => {
+    const d = distance(record.hash, hash);
+    return !best || d < best.distance ? { hash, distance: d } : best;
+  }, null);
+  const extra = [[
+    { name: 'Tipe Deteksi', value: 'Dataset pHash' },
+    { name: 'Reference pHash', value: `\`${reference?.hash || 'Tidak diketahui'}\`` },
+    { name: 'Jarak pHash', value: `${match.distance} (batas ${PHASH_THRESHOLD})` },
+    { name: 'Tindakan', value: 'Bukti dicatat → pesan dihapus → softban' }
+  ]];
+  await logEvidenceBeforeAction('🚨 PHASH MATCH — DATASET', 'Red', [record], extra);
 
-  if (images.size === 0 || REFERENCE_HASHES.length === 0) return;
+  const deleteFailures = await deleteTrackedMessages([record]);
+  const banResult = await softbanUser(message.guild, message.author.id, `Softban otomatis: gambar cocok dataset pHash (jarak ${match.distance})`);
+  const logChannel = await getLogChannel();
+  await logChannel.send({ embeds: [new EmbedBuilder()
+    .setColor(banResult.success ? 'DarkRed' : 'Orange')
+    .setTitle('Hasil Tindakan — PHASH MATCH')
+    .addFields(
+      { name: 'User ID', value: message.author.id },
+      { name: 'Pesan berhasil dihapus', value: deleteFailures.length ? `Tidak semua: ${deleteFailures.join('\n').slice(0, 900)}` : 'Ya' },
+      { name: 'Softban', value: banResult.success ? 'Berhasil (ban lalu unban)' : `Tidak tuntas: ${banResult.error || 'gagal unban'}` }
+    ).setTimestamp()] });
+}
 
-  for (const image of images.values()) {
-    try {
-      const newHash = await getImageHash(image.url);
-      const result = findMatchingHash(newHash);
-
-      if (!result.matched) continue;
-
-      console.log(
-        `[pHash] Gambar mirip terdeteksi! ` +
-        `User: ${message.author.tag}, ` +
-        `Jarak hash: ${result.distance}, ` +
-        `Pesan: ${message.id}`
-      );
-
-      if (PHASH_DRY_RUN) {
-        console.log("[pHash] DRY RUN: pesan belum dihapus.");
-        continue;
-      }
-
-      // Penghapusan otomatis akan diaktifkan pada tahap berikutnya.
-      await message.delete();
-      break;
-    } catch (error) {
-      console.error("[pHash] Gagal memproses gambar:", error);
-    }
+async function handleCrossChannelMatch(guild, userId, records, pairDistances) {
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (isExemptFromAutoModeration({ guild, author: { id: userId } }, member)) {
+    console.log(`[Cross-channel] User exempt, tidak dimoderasi: ${userId}`);
+    return;
   }
-});
 
+  const extras = records.map((record, index) => {
+    const comparisons = pairDistances
+      .filter(pair => pair.a === index || pair.b === index)
+      .map(pair => `Gambar ${pair.a + 1} ↔ ${pair.b + 1}: ${pair.distance}`)
+      .join('\n') || '—';
+    return [
+      { name: 'Tipe Deteksi', value: 'Cross-channel pHash (bukan dataset)' },
+      { name: 'Jumlah channel unik', value: `${new Set(records.map(r => r.channelId)).size}` },
+      { name: 'Jarak pHash antar-gambar', value: comparisons },
+      { name: 'Window waktu', value: `${ATTACHMENT_WINDOW_MS / 1000} detik` }
+    ];
+  });
+  await logEvidenceBeforeAction('🚨 CROSS-CHANNEL MATCH — 3 GAMBAR MIRIP', 'DarkRed', records, extras);
 
-// =========================
-// ANTI-SPAM: Attachment Lintas Channel
-// =========================
-// Jika satu user kirim attachment ke 2+ channel berbeda dalam 5 detik,
-// dianggap spam/scam bot -> ban permanen + hapus semua pesan attachment tadi.
-
-const ATTACHMENT_WINDOW_MS = 2 * 1000; 
-const MIN_CHANNELS = 2;                
-
-// Menyimpan jejak attachment per user: userId -> [{ channelId, messageId, timestamp }]
-const attachmentTracker = new Map();
+  const deleteFailures = await deleteTrackedMessages(records);
+  const result = await softbanUser(guild, userId, `Softban otomatis: ${records.length} gambar mirip di ${new Set(records.map(r => r.channelId)).size} channel dalam 2 detik`);
+  const logChannel = await getLogChannel();
+  await logChannel.send({ embeds: [new EmbedBuilder()
+    .setColor(result.success ? 'DarkRed' : 'Orange')
+    .setTitle('Hasil Tindakan — CROSS-CHANNEL MATCH')
+    .addFields(
+      { name: 'User ID', value: userId },
+      { name: 'Pesan berhasil dihapus', value: deleteFailures.length ? `Tidak semua: ${deleteFailures.join('\n').slice(0, 900)}` : 'Semua pesan target berhasil dihapus' },
+      { name: 'Softban', value: result.success ? 'Berhasil (ban lalu unban)' : `Tidak tuntas: ${result.error || 'gagal unban'}` }
+    ).setTimestamp()] });
+}
 
 client.on('messageCreate', async message => {
+  if (message.author.bot) return;
 
+  // Perintah manual untuk memperoleh pHash referensi.
+  if (message.content.trim() === '!phash') {
+    const attachment = message.attachments.find(isImageAttachment);
+    if (!attachment) {
+      await message.reply('Lampirkan satu gambar bersama perintah !phash.');
+      return;
+    }
     try {
-
-        // Abaikan bot & pesan tanpa attachment
-        if (message.author.bot) return;
-        if (message.attachments.size === 0) return;
-
-        const userId = message.author.id;
-        const now = Date.now();
-
-        // Ambil/inisialisasi jejak user ini
-        let records = attachmentTracker.get(userId) || [];
-
-        // Buang record yang sudah lewat window waktu
-        records = records.filter(r => now - r.timestamp <= ATTACHMENT_WINDOW_MS);
-
-        // Tambah record baru untuk pesan ini
-        records.push({
-            channelId: message.channelId,
-            messageId: message.id,
-            timestamp: now
-        });
-
-        attachmentTracker.set(userId, records);
-
-        // Hitung jumlah channel UNIK dalam window waktu
-        const uniqueChannels = new Set(records.map(r => r.channelId));
-
-        if (uniqueChannels.size >= MIN_CHANNELS) {
-
-            // Hapus jejak user supaya tidak ke-trigger berkali-kali
-            attachmentTracker.delete(userId);
-
-            // Hapus semua pesan attachment yang terdeteksi tadi
-            for (const record of records) {
-                try {
-                    const ch = await client.channels.fetch(record.channelId);
-                    const msg = await ch.messages.fetch(record.messageId);
-                    await msg.delete();
-                } catch (deleteError) {
-                    console.error(
-                        `Gagal hapus pesan ${record.messageId} di channel ${record.channelId}:`,
-                        deleteError.message
-                    );
-                }
-            }
-
-            // Ban permanen
-            try {
-                await message.guild.members.ban(userId, {
-                    reason: `Auto-ban: spam attachment di ${uniqueChannels.size} channel berbeda dalam ${ATTACHMENT_WINDOW_MS / 1000} detik`
-                });
-            } catch (banError) {
-                console.error('Gagal ban user:', banError.message);
-            }
-
-            // Log ke channel log
-            const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-
-            if (logChannel) {
-                const spamEmbed = new EmbedBuilder()
-                    .setColor('DarkRed')
-                    .setTitle('Auto-Ban: Spam Attachment Terdeteksi')
-                    .addFields(
-                        { name: 'User', value: message.author.tag },
-                        { name: 'User ID', value: userId },
-                        { name: 'Jumlah Channel', value: `${uniqueChannels.size}` },
-                        { name: 'Pesan Dihapus', value: `${records.length}` },
-                        { name: 'Window Waktu', value: `${ATTACHMENT_WINDOW_MS / 1000} detik` }
-                    )
-                    .setTimestamp();
-
-                await logChannel.send({ embeds: [spamEmbed] });
-            }
-
-            console.log(`Auto-ban: ${message.author.tag} (${userId}) — spam attachment di ${uniqueChannels.size} channel`);
-
-        }
-
+      const hash = await getImageHash(attachment.url);
+      await message.reply({ content: `Hash gambar referensi:\n\`${hash}\``, allowedMentions: { repliedUser: false } });
     } catch (error) {
-        console.error('Error di anti-spam attachment:', error);
+      console.error('Gagal menghitung hash:', error);
+      await message.reply('Gagal menghitung hash gambar.');
+    }
+    return;
+  }
+
+  if (!message.guild || message.attachments.size === 0 || processingMessages.has(message.id)) return;
+  const images = [...message.attachments.values()].filter(isImageAttachment);
+  if (!images.length) return;
+  processingMessages.add(message.id);
+
+  try {
+    const member = await getMemberForMessage(message);
+    if (isExemptFromAutoModeration(message, member)) return;
+
+    // Proses gambar untuk dataset dan simpan pHash agar bisa dibandingkan lintas channel.
+    const newRecords = [];
+    for (const image of images) {
+      try {
+        const hash = await getImageHash(image.url);
+        const timestamp = message.createdTimestamp || Date.now();
+        const record = {
+          userId: message.author.id,
+          authorTag: message.author.tag,
+          guildId: message.guild.id,
+          channelId: message.channelId,
+          channelName: message.channel?.name || message.channelId,
+          messageId: message.id,
+          timestamp,
+          imageUrl: image.url,
+          hash
+        };
+        newRecords.push(record);
+        const datasetMatch = findMatchingHash(hash);
+        if (datasetMatch.matched) {
+          // Hindari beberapa tindakan bersamaan untuk user yang sama.
+          if (processingUsers.has(message.author.id)) return;
+          processingUsers.add(message.author.id);
+          try { await handleDatasetMatch(message, record, datasetMatch); }
+          finally { processingUsers.delete(message.author.id); }
+          return;
+        }
+      } catch (error) {
+        console.error(`[pHash] Gagal memproses gambar ${image.name || image.id}:`, error.message);
+      }
     }
 
+    if (!newRecords.length) return;
+    const userId = message.author.id;
+    const now = Date.now();
+    let records = (attachmentTracker.get(userId) || [])
+      .filter(record => now - record.timestamp <= ATTACHMENT_WINDOW_MS && record.guildId === message.guild.id);
+    records.push(...newRecords);
+    // Maksimal satu rekaman per message/image untuk analisis; hanya butuh tiga gambar.
+    records = records.slice(-12);
+    attachmentTracker.set(userId, records);
+
+    if (processingUsers.has(userId)) return;
+    const candidate = records.filter(record => record.timestamp >= now - ATTACHMENT_WINDOW_MS);
+    const uniqueChannels = new Set(candidate.map(record => record.channelId));
+    if (uniqueChannels.size < MIN_CHANNELS) return;
+
+    // Cari kombinasi tiga gambar dari tiga channel berbeda yang semuanya mirip satu sama lain.
+    let found = null;
+    for (let i = 0; i < candidate.length && !found; i++) {
+      for (let j = i + 1; j < candidate.length && !found; j++) {
+        if (candidate[i].channelId === candidate[j].channelId) continue;
+        const d1 = distance(candidate[i].hash, candidate[j].hash);
+        if (d1 > PHASH_THRESHOLD) continue;
+        for (let k = j + 1; k < candidate.length; k++) {
+          if (new Set([candidate[i].channelId, candidate[j].channelId, candidate[k].channelId]).size !== 3) continue;
+          const d2 = distance(candidate[i].hash, candidate[k].hash);
+          const d3 = distance(candidate[j].hash, candidate[k].hash);
+          if (d2 <= PHASH_THRESHOLD && d3 <= PHASH_THRESHOLD) {
+            found = { records: [candidate[i], candidate[j], candidate[k]], distances: [
+              { a: 0, b: 1, distance: d1 }, { a: 0, b: 2, distance: d2 }, { a: 1, b: 2, distance: d3 }
+            ] };
+            break;
+          }
+        }
+      }
+    }
+    if (!found) return;
+
+    processingUsers.add(userId);
+    attachmentTracker.delete(userId);
+    try {
+      await handleCrossChannelMatch(message.guild, userId, found.records, found.distances);
+    } catch (error) {
+      // Jika log bukti gagal, fungsi belum menghapus/softban; jangan lanjutkan tindakan.
+      console.error('[Cross-channel] Deteksi/tindakan gagal:', error.message);
+    } finally {
+      processingUsers.delete(userId);
+    }
+  } catch (error) {
+    console.error('[AutoMod] Error pada messageCreate:', error);
+  } finally {
+    processingMessages.delete(message.id);
+  }
 });
 
 // =========================
